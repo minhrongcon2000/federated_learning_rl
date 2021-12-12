@@ -1,13 +1,15 @@
 from typing import Dict
 import torch
-from torch._C import device
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 
 
 class PensieveFeatureExtractor(nn.Module):
-    def __init__(self, device, features_dim: int = 256, num_quality: int=7):
+    def __init__(self, 
+                 device: str, 
+                 features_dim: int = 256, 
+                 num_quality: int=7):
         super().__init__()
         self.features_dim = features_dim
         self.num_quality = num_quality
@@ -53,6 +55,8 @@ class PensieveFeatureExtractor(nn.Module):
             nn.Linear(self.features_dim * 2, self.features_dim),
             nn.Tanh(),
         )
+        
+        self.to(self.device)
         
     def _preprocess_state(self, observations: Dict[str, np.ndarray]) -> Dict[str, torch.Tensor]:
         observations_tensor: Dict[str, torch.Tensor] = {}
