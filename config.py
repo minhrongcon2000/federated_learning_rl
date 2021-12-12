@@ -2,18 +2,27 @@ import torch
 from net_arch.feature_extractor import PensieveFeatureExtractor
 from net_arch.mlp import CartPoleNetwork, SB3MLPDQNNetwork
 from net_arch.single_path_net import SinglePathPolicy
-from utils import create_training_data, get_linear_exp_decay
+from utils import create_training_data, get_fcc_test_data, get_linear_exp_decay
 
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 
-ENV_CONF = {
+TRAIN_ENV_CONF = {
     "env_name": "SinglePath-v0",
     "num_env": 1,
     "params": {
         "train": True,
         "bitrate_list": create_training_data()
+    }
+}
+
+TEST_ENV_CONF = {
+    "env_name": "SinglePath-v0",
+    "num_env": 10,
+    "params": {
+        "train": False,
+        "bitrate_list": get_fcc_test_data()
     }
 }
 

@@ -2,7 +2,7 @@ from model_trainer import train_dqn_fl
 import config
 
 
-train_dqn_fl(env_config=config.ENV_CONF,
+train_dqn_fl(env_config=config.TRAIN_ENV_CONF,
              model_config=config.MODEL_CONF,
              server_config=config.SERVER_CONF,
              client_config=config.CLIENT_CONF,
