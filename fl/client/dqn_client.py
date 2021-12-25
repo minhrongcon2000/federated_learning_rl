@@ -1,3 +1,4 @@
+from copy import deepcopy
 import gym
 from typing import Any, Callable
 import tianshou as ts
@@ -52,3 +53,6 @@ class DQNClient(BaseClient):
             self.mean_reward = test_result["rew"].mean()
             
             self.eps = self.exp_update(self.eps)
+            
+        return test_result["rew"].mean(), deepcopy(self.policy.state_dict())
+            

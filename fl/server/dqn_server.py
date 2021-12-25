@@ -1,14 +1,17 @@
 import gym
 from typing import Any, Callable, List
-from fl.client.dqn_client import DQNClient
 import random
 import copy
 import tianshou as ts
 import torch
 import numpy as np
-from fl.server.base_server import BaseServer
+import multiprocessing as mp
+import os
 
+from fl.server.base_server import BaseServer
+from fl.client.dqn_client import DQNClient
 from fl.utils.logger import create_logger
+
 
 class DQNServer(BaseServer):
     def __init__(self,
@@ -52,6 +55,11 @@ class DQNServer(BaseServer):
     def broadcast(self) -> None:
         for client in self.client_pool:
             client.policy.load_state_dict(copy.deepcopy(self.policy.state_dict()))
+            
+    def update_client(self, client: DQNClient):
+        mean_reward, weight = client.update_weights()
+        self.logger.debug("Client {} finished update. Reward: {}".format(client.client_id, mean_reward))
+        return mean_reward, weight
         
     def aggregate(self) -> None:
         self.num_round += 1
@@ -65,17 +73,26 @@ class DQNServer(BaseServer):
         for key in global_policy_weights:
             global_policy_weights[key] = torch.zeros_like(global_policy_weights[key])
             
-        for client in chosen_client:
-            client.update_weights()
+        with mp.Pool(os.cpu_count()) as p:
+            results = p.map(self.update_client, chosen_client)
+            for mean_reward, weight in results:
+                rewards.append(mean_reward)
+                
+                for key in weight:
+                    global_policy_weights[key] += 1 / len(chosen_client) * weight[key]
+            p.close()
             
-            rewards.append(client.mean_reward)
+        # for client in chosen_client:
+        #     client.update_weights()
             
-            local_policy_weights = copy.deepcopy(client.policy.state_dict())
+        #     rewards.append(client.mean_reward)
             
-            for key in global_policy_weights:
-                global_policy_weights[key] += 1 / len(chosen_client) * local_policy_weights[key]
+        #     local_policy_weights = copy.deepcopy(client.policy.state_dict())
             
-            self.logger.debug("Client {} finished update. Reward: {}".format(client.client_id, client.mean_reward))
+        #     for key in global_policy_weights:
+        #         global_policy_weights[key] += 1 / len(chosen_client) * local_policy_weights[key]
+            
+        #     self.logger.debug("Client {} finished update. Reward: {}".format(client.client_id, client.mean_reward))
         
         self.policy.load_state_dict(global_policy_weights)
         self.mean_reward = np.mean(rewards)

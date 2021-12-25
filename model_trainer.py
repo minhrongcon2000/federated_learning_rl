@@ -1,7 +1,6 @@
 # environment dependencies
 import numpy as np
 import video_streaming_env.singlepath_env.envs.singlepath_gym
-import gym
 
 # Deep RL dependencies
 import tianshou as ts
@@ -11,11 +10,12 @@ from torch import nn
 from fl.server.dqn_server import DQNServer
 
 # utilities
-from typing import Any, Dict
+from typing import Any, Dict, Type
 import wandb
 import os
 import matplotlib.pyplot as plt
-from utils import set_global_seed
+from utils.env_builder import EnvBuilder
+from utils.random import set_global_seed
 
 
 def plot_training_curve(reward_means, reward_stdds, n_clients, figure_dir):
@@ -28,7 +28,6 @@ def plot_training_curve(reward_means, reward_stdds, n_clients, figure_dir):
                     alpha=0.2)
     plt.savefig(figure_dir, dpi=300)
     plt.show()
-
 
 def train_dqn_fl(env_config: Dict[Any, str],
                  model_config: Dict[Any, str],
@@ -62,19 +61,13 @@ def train_dqn_fl(env_config: Dict[Any, str],
     
     server = DQNServer(policy=policy, chosen_prob=server_config["chosen_prob"])
     
+    vec_env_class: Type[ts.env.BaseVectorEnv] = env_config["vec_env_class"]
+    
     for i in range(server_config["num_clients"]):
-        if "params" not in env_config:
-            env=ts.env.DummyVectorEnv(
-                [
-                    lambda: gym.make(env_config["env_name"]) \
-                        for _ in range(env_config["num_env"])
-                ]
-            )
-        else:
-            env=ts.env.DummyVectorEnv([
-                lambda: gym.make(env_config["env_name"], **env_config["params"]) \
-                    for _ in range(env_config["num_env"])
-            ])
+        env = vec_env_class([
+            EnvBuilder(env_config["env_name"], **env_config["params"]) \
+                for _ in range(env_config["num_env"])
+        ])
         
         server.add_client(
             client_id=i, 
