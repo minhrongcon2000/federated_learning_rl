@@ -1,5 +1,6 @@
 # environment dependencies
 import numpy as np
+from utils.client_pool_builder.base_pool_builder import BaseClientPoolBuilder
 import video_streaming_env.singlepath_env.envs.singlepath_gym
 
 # Deep RL dependencies
@@ -10,37 +11,25 @@ from torch import nn
 from fl.server.dqn_server import DQNServer
 
 # utilities
-from typing import Any, Dict, Type
+from typing import Any, Dict
 import wandb
 import os
-import matplotlib.pyplot as plt
-from utils.env_builder import EnvBuilder
 from utils.random import set_global_seed
+from utils.plot import plot_training_curve
+from utils.policy_builder import build_dqn_policy
 
 
-def plot_training_curve(reward_means, reward_stdds, n_clients, figure_dir):
-    reward_means = np.array(reward_means)
-    reward_stdds = np.array(reward_stdds)
-    plt.plot(np.arange(len(reward_means)), reward_means)
-    plt.fill_between(np.arange(len(reward_means)), 
-                    reward_means + 1.96 * reward_stdds / np.sqrt(n_clients),
-                    reward_means - 1.96 * reward_stdds / np.sqrt(n_clients),
-                    alpha=0.2)
-    plt.savefig(figure_dir, dpi=300)
-    plt.show()
-
-def train_dqn_fl(env_config: Dict[Any, str],
-                 model_config: Dict[Any, str],
-                 server_config: Dict[Any, str],
-                 client_config: Dict[Any, str],
-                 train_config: Dict[Any, str],
-                 wandb_config: Dict[Any, str]=None):
+def train_dqn_fl(model_config: Dict[str, Any],
+                 server_config: Dict[str, Any],
+                 client_pool_conf: Dict[str, Any],
+                 train_config: Dict[str, Any],
+                 wandb_config: Dict[str, Any]=None):
     
     set_global_seed(train_config["seed"])
-    
     if wandb_config is not None:
         os.environ["WANDB_API_KEY"] = wandb_config["WANDB_API_KEY"]
         
+    # logging stuffs
     if not os.path.exists(train_config["model_dir"]):
         os.mkdir(train_config["model_dir"])
     model_save_dir = os.path.join(train_config["model_dir"], train_config["model_name"])
@@ -48,37 +37,17 @@ def train_dqn_fl(env_config: Dict[Any, str],
     if not os.path.exists(train_config["result_dir"]):
         os.mkdir(train_config["result_dir"])
     figure_save_dir = os.path.join(train_config["result_dir"], train_config["result_fig"])
+    ##########################
     
-    net: nn.Module = model_config["model"]
-    optimizer_class = model_config["optimizer_class"]
-    optimizer = optimizer_class(net.parameters(), **model_config["optimizer_conf"])
+    policy = build_dqn_policy(model_config=model_config)
     
-    policy = ts.policy.DQNPolicy(net, 
-                                 optimizer, 
-                                 discount_factor=model_config["gamma"], 
-                                 estimation_step=model_config["n_step"], 
-                                 target_update_freq=model_config["target_update_freq"])
+    server = DQNServer(policy=policy, **server_config)
     
-    server = DQNServer(policy=policy, chosen_prob=server_config["chosen_prob"])
+    client_pool_builder: BaseClientPoolBuilder = client_pool_conf["builder"]()
+    client_conf_list = client_pool_builder.build_pool(**client_pool_conf["builder_params"])
     
-    vec_env_class: Type[ts.env.BaseVectorEnv] = env_config["vec_env_class"]
-    
-    for i in range(server_config["num_clients"]):
-        env = vec_env_class([
-            EnvBuilder(env_config["env_name"], **env_config["params"]) \
-                for _ in range(env_config["num_env"])
-        ])
-        
-        server.add_client(
-            client_id=i, 
-            env=env, 
-            local_batch_size=client_config["local_batch_size"], 
-            local_epochs=client_config["local_epochs"], 
-            buffer=ts.data.VectorReplayBuffer(client_config["max_buffer_size"], env_config["num_env"]), 
-            exploration_update=model_config["exploration_update"], 
-            step_per_collect=model_config["step_per_collect"], 
-            test_num=client_config["test_num"]
-        )
+    for client_conf in client_conf_list:
+        server.add_client(**client_conf)
         
     if wandb_config is not None:
         wandb.init(project=wandb_config["project"], 
@@ -89,21 +58,22 @@ def train_dqn_fl(env_config: Dict[Any, str],
     reward_means = []
     reward_stds = []
     
-    for i in range(train_config["num_rounds"]):
+    for _ in range(train_config["num_rounds"]):
         server.aggregate()
-        server.broadcast()
         
-        reward_means.append(server.mean_reward)
-        reward_stds.append(server.reward_std)
+        results = server.result
         
-        if max_reward is None or max_reward < server.mean_reward:
+        if max_reward is None or max_reward < results["server/mean_reward"]:
             server.save_model(model_save_dir)
-            max_reward = server.mean_reward
+            max_reward = results["server/mean_reward"]
+            
+        reward_means.append(results["server/mean_reward"])
+        reward_stds.append(results["server/reward_std"])
         
         if wandb_config is not None:
-            wandb.log({"mean_reward": server.mean_reward, "reward_std": server.reward_std})
+            wandb.log(server.result)
             
     plot_training_curve(reward_means, 
                         reward_stds, 
-                        server_config["num_clients"], 
+                        client_pool_conf["builder_params"]["n_client"], 
                         figure_save_dir)

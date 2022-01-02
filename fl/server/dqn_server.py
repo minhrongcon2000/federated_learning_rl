@@ -2,9 +2,9 @@ import gym
 from typing import Any, Callable, List
 import random
 import copy
+import numpy as np
 import tianshou as ts
 import torch
-import numpy as np
 import multiprocessing as mp
 import os
 
@@ -16,23 +16,29 @@ from fl.utils.logger import create_logger
 class DQNServer(BaseServer):
     def __init__(self,
                  policy: ts.policy.DQNPolicy,
-                 chosen_prob: float) -> None:
+                 chosen_prob: float,
+                 update_eps: bool = True) -> None:
 
         # global model info
         self.policy = policy
         
         # create clients
         self.client_pool: List[DQNClient] = []
+        self._chosen_client: List[DQNClient] = []
         self.chosen_prob = chosen_prob
-        self.mean_reward = 0
-        self.reward_std = 0
         
         self.logger = create_logger(__name__)
         self.num_round = 0
+        self.update_eps = update_eps
+        
+        if self.update_eps:
+            self.eps = 1
         
     def add_client(self, 
-                   client_id: Any, 
-                   env: gym.Env, 
+                   client_id: int,
+                   client_name: str,
+                   train_env: gym.Env, 
+                   test_env: gym.Env,
                    local_batch_size: int, 
                    local_epochs: int, 
                    buffer: ts.data.ReplayBuffer,
@@ -41,7 +47,9 @@ class DQNServer(BaseServer):
                    test_num: int):
         new_client = DQNClient(
             client_id=client_id,
-            env=env,
+            client_name=client_name,
+            train_env=train_env,
+            test_env=test_env,
             policy=copy.deepcopy(self.policy),
             batch_size=local_batch_size,
             epochs=local_epochs,
@@ -52,56 +60,64 @@ class DQNServer(BaseServer):
         )
         self.client_pool.append(new_client)
         
-    def broadcast(self) -> None:
-        for client in self.client_pool:
-            client.policy.load_state_dict(copy.deepcopy(self.policy.state_dict()))
+    def broadcast(self, clients: List[DQNClient]) -> None:
+        for client in clients:
+            client.receive_weight(copy.deepcopy(self.policy.state_dict()))
+            if self.update_eps:
+                client.eps = self.eps
             
     def update_client(self, client: DQNClient):
-        mean_reward, weight = client.update_weights()
-        self.logger.debug("Client {} finished update. Reward: {}".format(client.client_id, mean_reward))
-        return mean_reward, weight
+        client.update_weights()
+        return client
         
     def aggregate(self) -> None:
         self.num_round += 1
-        chosen_client: List[DQNClient] = random.sample(self.client_pool, 
+        self._chosen_client: List[DQNClient] = random.sample(self.client_pool, 
                                                        int(len(self.client_pool) * self.chosen_prob))
+        
+        self.broadcast(self._chosen_client)
         
         global_policy_weights = copy.deepcopy(self.policy.state_dict())
         
-        rewards = []
-        
         for key in global_policy_weights:
             global_policy_weights[key] = torch.zeros_like(global_policy_weights[key])
-            
+        
+        
         with mp.Pool(os.cpu_count()) as p:
-            results = p.map(self.update_client, chosen_client)
-            for mean_reward, weight in results:
-                rewards.append(mean_reward)
-                
+            results = p.map(self.update_client, self._chosen_client)
+            
+            for client in results:
+                # weight average
+                weight = copy.deepcopy(client.policy.state_dict())
                 for key in weight:
-                    global_policy_weights[key] += 1 / len(chosen_client) * weight[key]
-            p.close()
-            
-        # for client in chosen_client:
-        #     client.update_weights()
-            
-        #     rewards.append(client.mean_reward)
-            
-        #     local_policy_weights = copy.deepcopy(client.policy.state_dict())
-            
-        #     for key in global_policy_weights:
-        #         global_policy_weights[key] += 1 / len(chosen_client) * local_policy_weights[key]
-            
-        #     self.logger.debug("Client {} finished update. Reward: {}".format(client.client_id, client.mean_reward))
+                    global_policy_weights[key] += 1 / len(self._chosen_client) * weight[key]
+                
+                # update client for mp.Pool() will not modify object's state
+                self.client_pool[client.client_id] = client
         
         self.policy.load_state_dict(global_policy_weights)
-        self.mean_reward = np.mean(rewards)
-        self.reward_std = np.std(rewards, ddof=1)
-        
-        self.logger.info("Round {} complete. Mean reward: {}, std reward: {}".format(self.num_round, self.mean_reward, self.reward_std))
+        self.make_result()
+        self.logger.info("Round {} complete. Mean reward: {}, std reward: {}".format(self.num_round, 
+                                                                                     self.result["server/mean_reward"], 
+                                                                                     self.result["server/reward_std"]))
         
     def save_model(self, model_dir):
         torch.save(self.policy, model_dir)
         
     def load_model(self, model_dir):
         self.policy.load_state_dict(torch.load(model_dir))
+        
+    def make_result(self):
+        self.result = {}
+        rewards = []
+        for client in self.client_pool:
+            rewards.append(client.mean_reward)
+            self.result["{}/mean_reward".format(client.client_name)] = client.mean_reward
+            self.result["{}/reward_std".format(client.client_name)] = client.reward_std
+            
+        mean_reward = np.mean(rewards)
+        reward_std = np.std(rewards, ddof=1)
+        
+        self.result["server/mean_reward"] = mean_reward
+        self.result["server/reward_std"] = reward_std
+

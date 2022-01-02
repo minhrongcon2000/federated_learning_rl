@@ -5,11 +5,12 @@ import tianshou as ts
 
 from fl.client.base_client import BaseClient
 
-
 class DQNClient(BaseClient):
     def __init__(self,
                  client_id: Any,
-                 env: gym.Env,
+                 client_name: str,
+                 train_env: gym.Env,
+                 test_env: gym.Env,
                  policy: ts.policy.DQNPolicy,
                  batch_size: int,
                  epochs: int,
@@ -19,11 +20,12 @@ class DQNClient(BaseClient):
                  test_num: int) -> None:
         
         self.client_id = client_id
+        self.client_name = client_name
         self.policy = policy
         
         self.buffer = buffer
-        self.train_env = env
-        self.test_env = env
+        self.train_env = train_env
+        self.test_env = test_env
         
         self.train_collector = ts.data.Collector(self.policy, 
                                                  self.train_env, 
@@ -40,19 +42,22 @@ class DQNClient(BaseClient):
         self.test_num = test_num
         self.exp_update = exploration_update
         self.eps = 1
-        self.mean_reward = None
+        self.mean_reward = 0
+        self.reward_std = 0
+        
+    def test(self):
+        test_result = self.test_collector.collect(n_episode=self.test_num)
+        return test_result["rews"].mean(), test_result["rews"].std(ddof=1)
         
     def update_weights(self):
         for _ in range(self.epochs):
             self.policy.set_eps(self.eps)
             self.train_collector.collect(n_step=self.step_per_collect)
             self.policy.update(self.batch_size, self.train_collector.buffer)
-            
-            test_result = self.test_collector.collect(n_episode=self.test_num)
-            
-            self.mean_reward = test_result["rew"].mean()
-            
+            mean_reward, reward_std = self.test()
+            self.mean_reward = mean_reward
+            self.reward_std = reward_std
             self.eps = self.exp_update(self.eps)
-            
-        return test_result["rew"].mean(), deepcopy(self.policy.state_dict())
-            
+    
+    def receive_weight(self, state_dict):
+        self.policy.load_state_dict(state_dict)
