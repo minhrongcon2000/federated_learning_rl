@@ -17,6 +17,7 @@ import os
 from utils.random import set_global_seed
 from utils.plot import plot_training_curve
 from utils.policy_builder import build_dqn_policy
+import pandas as pd
 
 
 def train_dqn_fl(model_config: Dict[str, Any],
@@ -37,6 +38,7 @@ def train_dqn_fl(model_config: Dict[str, Any],
     if not os.path.exists(train_config["result_dir"]):
         os.mkdir(train_config["result_dir"])
     figure_save_dir = os.path.join(train_config["result_dir"], train_config["result_fig"])
+    result_data_dir = os.path.join(train_config["result_dir"], train_config["result_data"])
     ##########################
     
     policy = build_dqn_policy(model_config=model_config)
@@ -57,6 +59,7 @@ def train_dqn_fl(model_config: Dict[str, Any],
     
     reward_means = []
     reward_stds = []
+    data = []
     
     for _ in range(train_config["num_rounds"]):
         server.aggregate()
@@ -69,9 +72,12 @@ def train_dqn_fl(model_config: Dict[str, Any],
             
         reward_means.append(results["server/mean_reward"])
         reward_stds.append(results["server/reward_std"])
+        data.append(results)
         
         if wandb_config is not None:
             wandb.log(server.result)
+            
+    pd.DataFrame(data).to_csv(result_data_dir, index=False)
             
     plot_training_curve(reward_means, 
                         reward_stds, 

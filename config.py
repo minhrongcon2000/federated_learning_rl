@@ -77,19 +77,20 @@ CLIENT_POOL_CONF = {
 }
 
 TRAINING_CONF = {
-    "num_rounds": 200,
-    "seed": 44,
+    "num_rounds": 5,
+    "seed": 2,
     "model_dir": "tmp",
     "model_name": "demo.pth",
     "result_dir": "results",
-    "result_fig": "result.png"
+    "result_fig": "result.png",
+    "result_data": "result.csv"
 }
 
 # # Uncomment this for Wandb usage 
 # # and provide API key
-WANDB_CONFIG = {
-    "WANDB_API_KEY": "183c1a6a36cbdf0405f5baacb72690845ecc8573",
-    "project": "fl_rl",
-    "name": "fl_rl_dqn_non_iid"
-}
-# WANDB_CONFIG = None
+# WANDB_CONFIG = {
+#     "WANDB_API_KEY": "183c1a6a36cbdf0405f5baacb72690845ecc8573",
+#     "project": "fl_rl",
+#     "name": "fl_rl_dqn_non_iid_seed_2"
+# }
+WANDB_CONFIG = None
