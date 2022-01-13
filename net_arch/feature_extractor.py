@@ -56,6 +56,8 @@ class PensieveFeatureExtractor(nn.Module):
             nn.Tanh(),
         )
         
+        self.output_dim = self.features_dim
+        
         self.to(self.device)
         
     def _preprocess_state(self, observations: Dict[str, np.ndarray]) -> Dict[str, torch.Tensor]:

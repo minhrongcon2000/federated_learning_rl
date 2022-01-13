@@ -1,5 +1,5 @@
 import gym
-from typing import Any, Callable, List
+from typing import Callable, List
 import random
 import copy
 import numpy as np

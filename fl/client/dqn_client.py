@@ -1,4 +1,3 @@
-from copy import deepcopy
 import gym
 from typing import Any, Callable
 import tianshou as ts
@@ -18,7 +17,7 @@ class DQNClient(BaseClient):
                  exploration_update: Callable[[float], float],
                  step_per_collect: int,
                  test_num: int) -> None:
-        
+        super().__init__()
         self.client_id = client_id
         self.client_name = client_name
         self.policy = policy

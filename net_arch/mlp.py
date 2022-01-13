@@ -44,6 +44,7 @@ class MLPNetwork(nn.Module):
         return logits, state
 
 
+# borrow from default network of stable-baseline3
 class SB3MLPDQNNetwork(MLPNetwork):
     def __init__(self, 
                  input_dim: int, 
@@ -68,3 +69,38 @@ class CartPoleNetwork(MLPNetwork):
                          output_dim, 
                          activation_fn,
                          device)
+        
+
+# taken from single path repository of Long M. Luu
+class SinglepathActorNetwork(MLPNetwork):
+    def __init__(self, 
+                 input_dim: int, 
+                 output_dim: int, 
+                 activation_fn: nn.Module, 
+                 device: str) -> None:
+        super().__init__(input_dim, 
+                         [64, 64], 
+                         output_dim, 
+                         activation_fn, 
+                         device)
+        self.model.add_module(str(len(self.model)), torch.nn.Softmax(dim=-1))
+        
+        
+class SinglepathCriticNetwork(MLPNetwork):
+    def __init__(self, 
+                 input_dim: int,  
+                 output_dim: int, 
+                 activation_fn: nn.Module, 
+                 device: str) -> None:
+        super().__init__(input_dim, 
+                         [128, 128], 
+                         output_dim, 
+                         activation_fn, 
+                         device)
+        
+    def forward(self, 
+                obs: Union[np.ndarray, torch.Tensor], 
+                state: torch.Tensor=None,
+                info={}):
+        logits, _ = super().forward(obs, state, info)
+        return logits
